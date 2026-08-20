@@ -1,5 +1,18 @@
 # Build prompt: MILK RUN
 
+> **Read this first — four things changed, on Zac's instruction, before the
+> build started. The app that exists is HOURS, not MILK RUN.**
+>
+> | Spec says | Built as | Why |
+> |---|---|---|
+> | App called **MILK RUN**, folder `~/milk-run`, repo `Milk-Run` | **HOURS**, folder `~/hours`, repo `Hours` | Zac: "make it something about driving, because it actually is an app about driving" |
+> | Categories **MILK RUN** / **JOYRIDE** | **SENT** / **CHOSE** | Zac picked these when the app name changed. Coral/teal split is unchanged; the internal values are `'sent'` and `'chose'` |
+> | Empty map centres on Sydney | Asks for a location fix and centres on him (Sydney only as a last resort) | Zac's choice |
+> | Odometer label `MINUTES OF YOUR LIFE SPENT ON OTHER PEOPLE'S ERRANDS` | Same number, quieter label: `minutes spent on other people's errands` | Zac: "same idea, but just a bit less, you know, relaxed" |
+>
+> The seeded Gym routine, the localStorage key (`hours.v1`), and everything
+> else follow this spec as written.
+
 > Paste target: a **fresh Claude Code session** with zero context. Everything you
 > need is in this file. The project folder is `~/milk-run` and it is already
 > created and `git init`-ed. Build into it.
