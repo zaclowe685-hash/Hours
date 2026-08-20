@@ -74,8 +74,14 @@
   padding: calc(var(--sat) + 14px) var(--gap) calc(var(--tabbar-h) + var(--sab) + 28px);
   animation: screen-in 220ms var(--ease-out) both;
 }
-.screen.full {           /* the driving screen: no chrome, no padding */
+/* The driving and map screens fill the viewport. They cannot use position:
+   fixed — .screen keeps an identity transform from its entry animation, which
+   makes it a containing block — so they are absolute inside a full-height
+   screen instead. */
+.screen.full {
   padding: 0;
+  position: relative;
+  min-height: 100dvh;
 }
 @keyframes screen-in {
   from { opacity: 0; transform: translateY(12px); }
@@ -403,7 +409,7 @@
    ============================================================ */
 
 #drive-screen {
-  position: fixed; inset: 0;
+  position: absolute; inset: 0;
   z-index: 50;
   display: flex; flex-direction: column;
   align-items: center; justify-content: space-between;
@@ -700,6 +706,15 @@ input.field[type="time"], input.field[type="datetime-local"], input.field[type="
   text-shadow: 0 2px 20px rgba(0,0,0,.9);
   pointer-events: none;
 }
+.leaflet-control-zoom a {
+  background: rgba(38,28,24,.92) !important;
+  color: var(--peach) !important;
+  border-color: var(--ink-3) !important;
+  font-family: var(--f-mono);
+}
+.leaflet-control-zoom a:hover { background: var(--ink-3) !important; }
+.leaflet-bar { border: 1px solid var(--ink-3) !important; box-shadow: none !important; }
+
 .leaflet-popup-content-wrapper {
   background: var(--ink-2) !important;
   color: var(--bone) !important;
@@ -720,6 +735,8 @@ input.field[type="time"], input.field[type="datetime-local"], input.field[type="
   display: flex; align-items: center;
   overflow: hidden; white-space: nowrap;
   width: 0;
+  min-width: 0;          /* flex items refuse to go below min-content without this */
+  flex: 0 0 auto;
   transition: width 900ms var(--ease-out);
 }
 .split-seg.sent  { background: var(--sent); }

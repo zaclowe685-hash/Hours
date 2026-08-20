@@ -127,10 +127,14 @@ function createRoad(canvas) {
   let W = 0, H = 0, dpr = 1, horizon = 0;
   let offset = 0;
 
-  const CAM = 3.2;            // projection constant
-  const SPACING = 5.5;        // world units between dash starts
-  const DASH_LEN = 2.6;       // world units of painted dash
-  const FAR = 260;            // furthest dash we bother drawing
+  /* Camera height above the road. Everything else is measured against it:
+     a dash of length L at the bottom edge covers L/(CAM+L) of the road, so
+     CAM has to be large compared with a dash or the nearest one swallows
+     half the screen. */
+  const CAM = 10;
+  const SPACING = 2.2;        // world units between dash starts
+  const DASH_LEN = 1.1;       // world units of painted dash
+  const FAR = 140;            // furthest dash we bother drawing
 
   const noise = makeNoise();
 
@@ -159,7 +163,7 @@ function createRoad(canvas) {
     ctx.fillRect(0, 0, W, horizon + 42);
 
     // the road surface, a trapezoid narrowing to the horizon
-    const halfNear = W * 0.72, halfFar = halfNear * scaleAt(FAR);
+    const halfNear = W * 0.62, halfFar = halfNear * scaleAt(FAR);
     const yFar = project(FAR);
     ctx.beginPath();
     ctx.moveTo(W / 2 - halfNear, H);
@@ -187,8 +191,8 @@ function createRoad(canvas) {
       const zA = z, zB = z + DASH_LEN;
       if (zB < 0) continue;
       const yA = project(Math.max(0, zA)), yB = project(zB);
-      const wA = Math.max(0.4, 9 * scaleAt(Math.max(0, zA)));
-      const wB = Math.max(0.3, 9 * scaleAt(zB));
+      const wA = Math.max(0.4, 8 * scaleAt(Math.max(0, zA)));
+      const wB = Math.max(0.3, 8 * scaleAt(zB));
       ctx.globalAlpha = Math.max(0.12, Math.min(0.85, scaleAt(zA) * 1.5));
       ctx.beginPath();
       ctx.moveTo(W / 2 - wA, yA);

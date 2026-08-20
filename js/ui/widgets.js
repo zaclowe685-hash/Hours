@@ -213,26 +213,31 @@ export function holdButton({ label, holdMs = 600, onComplete }) {
   const fill = el('div', { class: 'hold-fill' });
   const node = el('button', { class: 'hold-btn' }, fill, el('span', { text: label }));
 
-  let raf = null, startedAt = 0, fired = false;
+  let raf = null, timer = null, startedAt = 0, fired = false;
 
   function stop() {
-    cancelAnimationFrame(raf);
-    raf = null;
+    if (raf) { cancelAnimationFrame(raf); raf = null; }
+    if (timer) { clearTimeout(timer); timer = null; }
     fill.style.width = '0%';
   }
+  function fire() {
+    if (fired) return;
+    fired = true;
+    stop();
+    onComplete();
+  }
+  /* the ring is painted by rAF, but completion is on a plain timer: ending
+     the drive must not depend on animation frames being scheduled */
   function tick() {
     const p = Math.min(1, (Date.now() - startedAt) / holdMs);
     fill.style.width = (p * 100) + '%';
-    if (p >= 1) {
-      if (!fired) { fired = true; stop(); onComplete(); }
-      return;
-    }
-    raf = requestAnimationFrame(tick);
+    if (p < 1) raf = requestAnimationFrame(tick);
   }
   function begin(e) {
     e.preventDefault();
     if (fired) return;
     startedAt = Date.now();
+    timer = setTimeout(fire, holdMs);
     raf = requestAnimationFrame(tick);
   }
 

@@ -114,7 +114,13 @@ function draw() {
   if (old) old.remove();
 
   if (!drives.length && !places.length) {
-    if (screen) screen.appendChild(el('div', { class: 'map-empty', text: 'No drives yet. Your city is blank.' }));
+    const anyDrives = store.get().drives.length > 0;
+    if (screen) screen.appendChild(el('div', {
+      class: 'map-empty',
+      text: anyDrives
+        ? 'Nothing mapped yet. Drives need location switched on.'
+        : 'No drives yet. Your city is blank.'
+    }));
     centreOnHim();
   } else {
     fit();

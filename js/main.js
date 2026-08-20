@@ -12,8 +12,6 @@ import { endDrive } from './ui/finish.js';
 
 const CATCHUP_EVERY_MS = 60000;
 
-boot();
-
 function boot() {
   store.load();
   paintGrain();
@@ -71,7 +69,11 @@ function boot() {
 
   window.addEventListener('online', () => drive.retryPendingRoutes());
 
-  if ('serviceWorker' in navigator) {
+  /* The service worker is what makes the app open with no signal — but its
+     cache-first shell would also serve stale code while building locally, so
+     it is only registered on the real site, never on localhost or the LAN. */
+  const localDev = /^(localhost|127\.0\.0\.1|\[::1\]|192\.168\.|10\.)/.test(location.hostname);
+  if ('serviceWorker' in navigator && !localDev) {
     window.addEventListener('load', () => {
       navigator.serviceWorker.register('sw.js').catch(() => {});
     });
@@ -135,3 +137,6 @@ function showTour() {
   paint();
   document.body.appendChild(back);
 }
+
+/* everything above is declared before this runs */
+boot();

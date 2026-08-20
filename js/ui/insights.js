@@ -25,22 +25,25 @@ export function mount(root) {
   const bothMs = Math.max(1, sentMs + choseMs);
   const sentPct = (sentMs / bothMs) * 100;
 
-  const segSent = el('div', { class: 'split-seg sent' }, el('b', { text: S.fmtDur(sentMs) }));
-  const segChose = el('div', { class: 'split-seg chose' }, el('b', { text: S.fmtDur(choseMs) }));
+  // the bigger number is labelled inside the bar; the smaller one sits outside
+  const sentBigger = sentMs >= choseMs;
+  const segSent = el('div', { class: 'split-seg sent' }, sentBigger ? el('b', { text: S.fmtDur(sentMs) }) : null);
+  const segChose = el('div', { class: 'split-seg chose' }, sentBigger ? null : el('b', { text: S.fmtDur(choseMs) }));
   const bar = el('div', { class: 'split-bar' }, segSent, segChose);
 
   root.appendChild(el('div', { class: 'card' },
     el('div', { class: 'label', style: { marginBottom: '10px' } }, 'SENT VS CHOSE, ALL TIME'),
     bar,
     el('div', { class: 'split-legend' },
-      el('span', { class: 's', text: `SENT ${Math.round(sentPct)}%` }),
-      el('span', { class: 'c', text: `CHOSE ${Math.round(100 - sentPct)}%` })
+      el('span', { class: 's', text: `SENT ${S.fmtDur(sentMs)} · ${Math.round(sentPct)}%` }),
+      el('span', { class: 'c', text: `CHOSE ${S.fmtDur(choseMs)} · ${Math.round(100 - sentPct)}%` })
     )
   ));
-  requestAnimationFrame(() => {
+  // a plain timer, not rAF: the bar must still grow if frames are throttled
+  setTimeout(() => {
     segSent.style.width = sentPct + '%';
     segChose.style.width = (100 - sentPct) + '%';
-  });
+  }, 30);
 
   /* --- the big honest number -------------------------------------- */
   root.appendChild(el('div', { class: 'card' },
@@ -96,7 +99,7 @@ export function mount(root) {
         el('div', { class: 'bar-track' }, fill),
         el('div', { class: 't', text: S.fmtMins(t.ms) + 'm' })
       ));
-      requestAnimationFrame(() => { fill.style.width = Math.max(4, (t.ms / peak) * 100) + '%'; });
+      setTimeout(() => { fill.style.width = Math.max(4, (t.ms / peak) * 100) + '%'; }, 30);
     });
     root.appendChild(el('div', { class: 'card' },
       el('div', { class: 'label', style: { marginBottom: '12px' } }, 'TOP TAGS'), bars));
