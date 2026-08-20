@@ -1,0 +1,82 @@
+/* HOURS — Highway Sunset. Palette + type scale. Nothing else may introduce colour. */
+@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Mono:wght@400;500&family=Inter:wght@400;500;600&display=swap');
+
+:root {
+  /* --- palette (locked) --- */
+  --ink:      #1C1512;
+  --ink-2:    #261C18;
+  --ink-3:    #33261F;
+  --coral:    #FF8A5B;
+  --rust:     #E5533D;
+  --peach:    #FFD9A0;
+  --teal:     #2FB6A8;
+  --bone:     #F4EDE4;
+  --dust:     #8C7A6B;
+  --coral-glow: rgba(255,138,91,.28);
+  --teal-glow:  rgba(47,182,168,.28);
+
+  /* derived shades — lifts and sinks of the nine above, nothing new */
+  --ink-lift:  #2E2119;   /* top-lit face of a raised disc */
+  --ink-sink:  #1F1713;   /* its shaded underside */
+  --ink-warm:  #2A1E18;   /* warm end of a surface gradient */
+  --ink-cool:  #241A15;   /* cool end of one */
+  --ink-shim:  #46362C;   /* the moving band in a loading shimmer */
+  --rust-deep: #7A2E22;
+  --rust-lift: #B33E2D;
+  --road-far:  #2A1F19;   /* tarmac at the horizon */
+  --road-near: #191311;   /* tarmac at your bumper */
+
+  /* category colour is a hard rule: SENT = coral, CHOSE = teal */
+  --sent:  var(--coral);
+  --chose: var(--teal);
+
+  /* --- type --- */
+  --f-display: 'Bebas Neue', Impact, 'Haettenschweiler', sans-serif;
+  --f-mono:    'DM Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --f-body:    'Inter', system-ui, -apple-system, sans-serif;
+
+  --t-xs:  11px;
+  --t-sm:  13px;
+  --t-md:  15px;
+  --t-lg:  18px;
+  --t-xl:  24px;
+  --t-2xl: 34px;
+
+  /* --- spacing / shape --- */
+  --gap:    16px;
+  --gap-sm:  8px;
+  --gap-lg: 26px;
+  --r-sm:  10px;
+  --r-md:  16px;
+  --r-lg:  22px;
+
+  /* --- safe areas (iPhone notch + home indicator) --- */
+  --sat: env(safe-area-inset-top, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
+  --sar: env(safe-area-inset-right, 0px);
+
+  --tabbar-h: 62px;
+
+  /* --- motion --- */
+  --ease-out:  cubic-bezier(.2,.9,.25,1);
+  --ease-over: cubic-bezier(.34,1.4,.64,1);
+}
+
+body {
+  background: var(--ink);
+  color: var(--bone);
+  font-family: var(--f-body);
+  font-size: var(--t-md);
+  line-height: 1.45;
+}
+
+.display { font-family: var(--f-display); letter-spacing: .04em; }
+.mono    { font-family: var(--f-mono); }
+.label {
+  font-family: var(--f-mono);
+  font-size: var(--t-xs);
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--dust);
+}
