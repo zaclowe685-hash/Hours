@@ -10,7 +10,7 @@ import { getFix, routeBetween, metresBetween } from './geo.js';
 import { resolveDestination, matchPlace } from './places.js';
 
 export const STALE_MS = 6 * 60 * 60 * 1000;   // 6 hours
-export const MIN_DRIVE_MS = 20 * 1000;        // under 20 s, ask before saving
+export const MIN_DRIVE_MS = 30 * 1000;        // under 30 s, ask before saving
 export const DRIFT_M = 120;                   // closer than this = stayed local
 
 /* --- state ------------------------------------------------------------ */
