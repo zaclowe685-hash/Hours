@@ -230,7 +230,7 @@ function routineNotice() {
   const r = store.get().routines.find(x => x.id === routineId);
   const name = (r && r.name) || todays[0].placeLabel || 'routine';
   const legs = todays.filter(d => d.routineId === routineId);
-  const mins = legs[0] ? S.fmtMins(legs[0].durationMs) : 0;
+  const mins = legs[0] ? S.formatMinutes(legs[0].durationMs) : 0;
 
   const line = el('div', { class: 'line-nudge' });
   line.appendChild(el('span', {}, `Logged your ${name.toLowerCase()} — ${mins} min${legs.length > 1 ? ' each way' : ''}.`));
