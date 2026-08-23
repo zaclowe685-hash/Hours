@@ -95,7 +95,7 @@ export function byCategory(drives, cat) {
 
 /* Lifetime minutes driven for other people — the home odometer. */
 export function sentMinutes(drives) {
-  return formatMinutes(totalMs(byCategory(drives, 'sent')));
+  return formatMins(totalMs(byCategory(drives, 'sent')));
 }
 
 /* --- weeks ------------------------------------------------------------ */
