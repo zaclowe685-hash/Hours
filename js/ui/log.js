@@ -64,7 +64,7 @@ export function mount(root) {
 
   groups.forEach((dayDrives, key) => {
     const ts = dayDrives[0].startedAt;
-    const mins = S.fmtMins(S.totalMs(dayDrives));
+    const mins = S.formatMinutes(S.totalMs(dayDrives));
     root.appendChild(el('div', { class: 'date-head' },
       el('span', { text: S.fmtDateHead(ts) }),
       el('span', { class: 'tot', text: `${dayDrives.length} drive${dayDrives.length === 1 ? '' : 's'} · ${mins} min` })
