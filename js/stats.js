@@ -115,7 +115,7 @@ export function weekSummary(drives, weekStart) {
     minutes: formatMinutes(totalMs(week)),
     km: Math.round(totalKm(week) * 10) / 10,
     sentMinutes: formatMinutes(totalMs(byCategory(week, 'sent'))),
-    choseMinutes: fmtMins(totalMs(byCategory(week, 'chose')))
+    choseMinutes: formatMinutes(totalMs(byCategory(week, 'chose')))
   };
 }
 
