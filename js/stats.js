@@ -160,7 +160,7 @@ export function hourDial(drives) {
     hour: i,
     minutes: fmtMins(h.ms),
     frac: h.ms / peak,
-    cat: h.sent >= h.chose ? 'sent' : 'chose'
+    cat: h.sent > h.chose ? 'sent' : 'chose'
   }));
 }
 
