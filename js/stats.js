@@ -112,7 +112,7 @@ export function weekSummary(drives, weekStart) {
   const week = inRange(drives, weekStart, end);
   return {
     drives: week.length,
-    minutes: formatMinutes(totalMs(week)),
+    minutes: formatMins(totalMs(week)),
     km: Math.round(totalKm(week) * 10) / 10,
     sentMinutes: formatMinutes(totalMs(byCategory(week, 'sent'))),
     choseMinutes: formatMinutes(totalMs(byCategory(week, 'chose')))
