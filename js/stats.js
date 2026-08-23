@@ -158,7 +158,7 @@ export function hourDial(drives) {
   const peak = Math.max(1, ...hours.map(h => h.ms));
   return hours.map((h, i) => ({
     hour: i,
-    minutes: fmtMins(h.ms),
+    minutes: formatMinutes(h.ms),
     frac: h.ms / peak,
     cat: h.sent > h.chose ? 'sent' : 'chose'
   }));
