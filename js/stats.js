@@ -49,7 +49,7 @@ export function fmtDur(ms) {
   return m === 0 ? `${h} h` : `${h} h ${m} m`;
 }
 
-export function formatMinutes(ms) { return Math.round(Math.max(0, ms) / 60000); }
+export function formatMins(ms) { return Math.round(Math.max(0, ms) / 60000); }
 
 export function fmtTime(ts) {
   const d = new Date(ts);
