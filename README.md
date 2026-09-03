@@ -94,3 +94,16 @@ tiles come from CARTO. No API keys, no accounts, no billing.
 - Deployed on **GitHub Pages** from a **public** repo — that's required for
   Pages, and it must stay public or the phone version goes dead.
 - Map data © OpenStreetMap contributors, tiles © CARTO.
+
+## Notes for Claude sessions
+
+*(moved here from the global `~/.claude/CLAUDE.md` on 2026-09-03 — the registry row now just points here)*
+
+Zac calls this "HOURS", "the drive tracker", "my drives" or "the driving app".
+
+- Start: `python3 ~/scripts/serve-nocache.py ~/hours 5490` → localhost:5490. LIVE: zaclowe685-hash.github.io/Hours (GitHub Pages, repo `Hours`, must stay **PUBLIC**).
+- Checks: `node tools/check.mjs` — every import resolves, the service worker caches every module, and no colour is used outside the palette. `python3 tools/make-icons.py` redraws the app icons from code.
+- One-tap drive log for his P plates: tap GO getting in the car, lock the phone, tap HOME getting out. The stopwatch is a stored timestamp so it survives the phone locking or the tab dying; the route is reconstructed from two GPS pins via OSRM and labelled as the likely road route, never a recorded trace.
+- **SENT** (someone asked him) vs **CHOSE** (his own) is the split the whole app is built on — coral vs teal, everywhere.
+- TickTick-style recurring drives auto-log (seeded: Gym, Wed+Fri 6:30am, 7 min each way); quick-add for forgotten drives; Leaflet map of every route ever driven; weekly wrap PNG for the family group chat.
+- `?go=1` and `?end=1` are the iPhone Shortcuts widgets — that pair is the whole point of the app.
