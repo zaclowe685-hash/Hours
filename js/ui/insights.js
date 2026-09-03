@@ -97,7 +97,7 @@ export function mount(root) {
       bars.appendChild(el('div', { class: 'bar-row' },
         el('div', { class: 'n', text: '#' + t.tag }),
         el('div', { class: 'bar-track' }, fill),
-        el('div', { class: 't', text: S.formatMinutes(t.ms) + 'm' })
+        el('div', { class: 't', text: S.formatMins(t.ms) + 'm' })
       ));
       setTimeout(() => { fill.style.width = Math.max(4, (t.ms / peak) * 100) + '%'; }, 30);
     });
