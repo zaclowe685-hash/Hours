@@ -1,15 +1,13 @@
 /* HOURS — geo.js
-   Two GPS fixes per drive (one on GO, one on HOME), a real road route from
-   OSRM between them, and a name for the destination from Nominatim.
+   One GPS fix when GO is tapped (it becomes home if home isn't set yet), and
+   real road routes from OSRM between home and each errand.
    Nothing here ever blocks the UI. */
 
 import * as store from './store.js';
 
 const GEO_OPTS = { enableHighAccuracy: true, timeout: 12000, maximumAge: 30000 };
 const OSRM = 'https://router.project-osrm.org/route/v1/driving/';
-const NOMINATIM = 'https://nominatim.openstreetmap.org/reverse';
 const NET_TIMEOUT_MS = 5000;
-const NOMINATIM_MIN_GAP_MS = 1000;   // their usage policy: 1 request per second
 
 /* --- one GPS fix ------------------------------------------------------ */
 
@@ -107,58 +105,6 @@ export async function routeBetween(from, to) {
       source: 'estimate'
     };
   }
-}
-
-/* --- reverse geocoding ------------------------------------------------ */
-
-let lastNominatimAt = 0;
-const inFlight = new Map();
-
-function tidy(label) {
-  if (!label) return null;
-  const s = String(label).trim().replace(/\s+/g, ' ');
-  if (!s) return null;
-  return s.length > 40 ? s.slice(0, 39).trimEnd() + '…' : s;
-}
-
-function pickName(data) {
-  if (!data) return null;
-  const a = data.address || {};
-  return tidy(data.name)
-      || tidy(a.shop)
-      || tidy(a.amenity)
-      || tidy([a.road, a.suburb].filter(Boolean).join(', '))
-      || null;
-}
-
-export async function reverseGeocode(lat, lon) {
-  const cached = store.cachedName(lat, lon);
-  if (cached) return cached;
-
-  const key = store.cacheKey(lat, lon);
-  if (inFlight.has(key)) return inFlight.get(key);
-
-  const job = (async () => {
-    const wait = Math.max(0, NOMINATIM_MIN_GAP_MS - (Date.now() - lastNominatimAt));
-    if (wait > 0) await new Promise(r => setTimeout(r, wait));
-    lastNominatimAt = Date.now();
-
-    const url = `${NOMINATIM}?format=json&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1`;
-    try {
-      const res = await withTimeout(url);
-      if (!res.ok) throw new Error('nominatim ' + res.status);
-      const name = pickName(await res.json()) || 'Unnamed stop';
-      store.cacheName(lat, lon, name);
-      return name;
-    } catch (e) {
-      return 'Unnamed stop';   // never show raw coordinates
-    } finally {
-      inFlight.delete(key);
-    }
-  })();
-
-  inFlight.set(key, job);
-  return job;
 }
 
 export function online() { return navigator.onLine !== false; }

@@ -1,19 +1,19 @@
 /* HOURS — drive.js
-   IDLE -> DRIVING -> IDLE (plus the finish sheet).
+   IDLE -> OUT ON A RUN -> IDLE (plus the "what was it?" sheet).
 
    The stopwatch is a stored timestamp, never a running counter. Elapsed is
    always Date.now() - startedAt, computed fresh, so it is exact whether the
-   phone was locked for 7 minutes or the tab was killed for 3 hours. */
+   phone was locked for 7 minutes or the tab was killed for 3 hours.
+
+   A run is timed from leaving home (GO) to walking back in (I'M BACK) —
+   shopping, queueing and waiting in the car park all count. */
 
 import * as store from './store.js';
-import { getFix, routeBetween, metresBetween } from './geo.js';
-import { resolveDestination, matchPlace } from './places.js';
+import * as errands from './errands.js';
+import { getFix } from './geo.js';
 
-export const STALE_MS = 6 * 60 * 60 * 1000;   // 6 hours
+export const STALE_MS = 6 * 60 * 60 * 1000;   // 6 hours: he forgot to tap I'M BACK
 export const MIN_DRIVE_MS = 30 * 1000;        // under 30 s, ask before saving
-export const DRIFT_M = 120;                   // closer than this = stayed local
-
-/* --- state ------------------------------------------------------------ */
 
 export function isDriving() { return !!store.getLive(); }
 
@@ -29,17 +29,21 @@ export function isStale() {
 
 /* --- starting --------------------------------------------------------- */
 
-export function start() {
+export function start(errandId = null) {
   if (store.getLive()) return store.getLive();   // a second GO is harmless
 
   // 1. the timestamp goes down first, before anything can fail
-  store.setLive({ startedAt: Date.now(), from: null, geoStatus: 'pending' });
+  store.setLive({ startedAt: Date.now(), from: null, errandId });
 
-  // 2. GPS lands whenever it lands; the drive is already running
+  // 2. GPS lands whenever it lands. GO is always tapped at home, so the
+  //    first fix ever becomes home — nobody has to find a setting for it.
   getFix().then(fix => {
-    if (!store.getLive()) return;               // he finished before it landed
-    if (fix.ok) store.patchLive({ from: fix.coords, geoStatus: 'ok' });
-    else        store.patchLive({ geoStatus: fix.status });
+    if (!fix.ok) return;
+    if (store.getLive()) store.patchLive({ from: fix.coords });
+    if (!store.get().settings.homeCoords) {
+      store.setting('homeCoords', fix.coords);
+      errands.resolveRoutes();
+    }
   });
 
   return store.getLive();
@@ -47,136 +51,51 @@ export function start() {
 
 /* --- finishing -------------------------------------------------------- */
 /* Returns { short, drive }. When short is true the drive is NOT saved — the
-   UI asks first. Call commit(drive) to keep it. */
+   UI asks first and calls keep(drive) if he wants it. */
 
 export function finish(endedAtOverride) {
   const live = store.getLive();
   if (!live) return null;
 
   const endedAt = endedAtOverride || Date.now();
-  const durationMs = Math.max(0, endedAt - live.startedAt);
-
   const drive = store.newDrive({
-    category: store.get().settings.lastCategory,   // remembered from last time
-    startedAt: live.startedAt,
-    endedAt,
-    durationMs,
-    from: live.from || null,
-    to: null,
-    routeSource: live.from ? 'pending' : 'none',
-    origin: 'manual'
-  });
-
-  store.setLive(null);
-
-  const short = durationMs < MIN_DRIVE_MS;
-  if (!short) commit(drive);
-  return { short, drive };
-}
-
-/* Saves the drive and kicks off the end fix, naming and routing in the
-   background. Nothing here blocks the UI. */
-export function commit(drive) {
-  if (!store.getDrive(drive.id)) store.addDrive(drive);
-
-  getFix().then(async fix => {
-    if (fix.ok) {
-      store.updateDrive(drive.id, { to: fix.coords });
-    } else {
-      store.updateDrive(drive.id, { routeSource: 'none' });
-    }
-    const fresh = store.getDrive(drive.id);
-    if (!fresh) return;                       // deleted while we were waiting
-    await nameIt(fresh);
-    resolveRoute(fresh.id);
-  });
-
-  return drive;
-}
-
-async function nameIt(drive) {
-  // Ended within 120 m of where he started: don't ask a server about his house.
-  if (drive.from && drive.to && stayedLocal(drive)) {
-    const hit = matchPlace(drive.to);
-    if (hit) {
-      store.updateDrive(drive.id, { placeId: hit.id, placeLabel: hit.label });
-      store.updatePlace(hit.id, { visits: (hit.visits || 0) + 1, totalMs: (hit.totalMs || 0) + drive.durationMs });
-    } else {
-      store.updateDrive(drive.id, { placeLabel: 'Round trip' });
-    }
-    return;
-  }
-  await resolveDestination(drive);
-}
-
-export function stayedLocal(drive) {
-  if (!drive.from || !drive.to) return false;
-  const m = metresBetween(drive.from, drive.to);
-  return m !== null && m < DRIFT_M;
-}
-
-/* --- routing (lazy, never blocks) ------------------------------------- */
-
-export async function resolveRoute(driveId) {
-  const drive = store.getDrive(driveId);
-  if (!drive) return;
-  if (!drive.from || !drive.to) {
-    store.updateDrive(driveId, { routeSource: 'none', distanceKm: null, routeGeometry: null });
-    return;
-  }
-  if (stayedLocal(drive)) {
-    // GPS drift, not a journey. No line, no distance.
-    store.updateDrive(driveId, { routeSource: 'none', distanceKm: null, routeGeometry: null });
-    return;
-  }
-  if (navigator.onLine === false) {
-    store.updateDrive(driveId, { routeSource: 'pending' });   // retried next open
-    return;
-  }
-
-  const route = await routeBetween(drive.from, drive.to);
-  if (!route) {
-    store.updateDrive(driveId, { routeSource: 'none' });
-    return;
-  }
-  store.updateDrive(driveId, {
-    distanceKm: Math.round(route.distanceKm * 10) / 10,
-    routeGeometry: route.geometry,
-    routeSource: route.source
-  });
-  store.emit('route', driveId);
-}
-
-/* Anything left 'pending' from an offline drive gets another go on open. */
-export function retryPendingRoutes() {
-  if (navigator.onLine === false) return;
-  store.get().drives
-    .filter(d => d.routeSource === 'pending' && d.from && d.to)
-    .slice(0, 20)                       // don't stampede OSRM after a long trip
-    .forEach((d, i) => setTimeout(() => resolveRoute(d.id), i * 400));
-}
-
-/* --- the stale-drive recovery ----------------------------------------- */
-
-/* Finish a forgotten drive with an explicit duration (or "now"). */
-export function recoverWith(durationMs) {
-  const live = store.getLive();
-  if (!live) return null;
-  const endedAt = durationMs ? live.startedAt + durationMs : Date.now();
-  const drive = store.newDrive({
-    category: store.get().settings.lastCategory,
+    errandId: live.errandId || null,
     startedAt: live.startedAt,
     endedAt,
     durationMs: Math.max(0, endedAt - live.startedAt),
     from: live.from || null,
-    routeSource: live.from ? 'pending' : 'none',
-    origin: 'manual'
+    origin: 'live'
+  });
+
+  store.setLive(null);
+  const short = drive.durationMs < MIN_DRIVE_MS;
+  if (!short) store.addDrive(drive);
+  return { short, drive };
+}
+
+export function keep(drive) {
+  if (!store.getDrive(drive.id)) store.addDrive(drive);
+  return drive;
+}
+
+export function setErrand(live, errandId) {
+  if (live) store.patchLive({ errandId });
+}
+
+/* Finish a forgotten run with an explicit length. */
+export function recoverWith(durationMs) {
+  const live = store.getLive();
+  if (!live) return null;
+  const drive = store.newDrive({
+    errandId: live.errandId || null,
+    startedAt: live.startedAt,
+    endedAt: live.startedAt + durationMs,
+    durationMs,
+    from: live.from || null,
+    origin: 'live'
   });
   store.setLive(null);
   store.addDrive(drive);
-  // no end fix — he is not there any more, so the route stays unknown
-  store.updateDrive(drive.id, { routeSource: 'none' });
-  if (!drive.placeLabel) store.updateDrive(drive.id, { placeLabel: 'Unnamed stop' });
   return drive;
 }
 

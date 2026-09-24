@@ -1,9 +1,10 @@
 /* HOURS — service worker.
-   Cache-first for the app shell so it opens and logs a drive with no network,
-   revalidating in the background. Map tiles, OSRM and Nominatim are never
+   Network-first for the app's own files (so an update shows up on the next
+   open) with the cache as the no-signal fallback; cache-first for fonts and
+   Leaflet. Map tiles, OSRM and Nominatim are never
    cached — a stale route is worse than no route. */
 
-const CACHE_VERSION = 'hours-v1';
+const CACHE_VERSION = 'hours-v2';
 
 const SHELL = [
   './',
@@ -15,18 +16,16 @@ const SHELL = [
   'js/main.js',
   'js/store.js',
   'js/drive.js',
+  'js/errands.js',
   'js/geo.js',
-  'js/places.js',
-  'js/routines.js',
   'js/stats.js',
   'js/ui/screens.js',
   'js/ui/home.js',
   'js/ui/driving.js',
-  'js/ui/finish.js',
-  'js/ui/log.js',
+  'js/ui/sheets.js',
+  'js/ui/proof.js',
+  'js/ui/runs.js',
   'js/ui/map.js',
-  'js/ui/insights.js',
-  'js/ui/routinesUI.js',
   'js/ui/settings.js',
   'js/ui/widgets.js',
   'assets/icon-192.png',
@@ -38,6 +37,7 @@ const SHELL = [
 
 const NEVER_CACHE = [
   'basemaps.cartocdn.com',
+  'services.arcgisonline.com',
   'router.project-osrm.org',
   'nominatim.openstreetmap.org'
 ];
@@ -63,16 +63,27 @@ self.addEventListener('fetch', e => {
   if (req.method !== 'GET') return;
   if (NEVER_CACHE.some(host => req.url.includes(host))) return;
 
-  e.respondWith(
-    caches.match(req).then(hit => {
-      const live = fetch(req).then(res => {
-        if (res && res.status === 200 && (res.type === 'basic' || res.type === 'cors')) {
-          const copy = res.clone();
-          caches.open(CACHE_VERSION).then(c => c.put(req, copy));
-        }
-        return res;
-      }).catch(() => hit);
-      return hit || live;
-    })
-  );
+  const own = new URL(req.url).origin === self.location.origin;
+  const save = res => {
+    if (res && res.status === 200 && (res.type === 'basic' || res.type === 'cors')) {
+      const copy = res.clone();
+      caches.open(CACHE_VERSION).then(c => c.put(req, copy));
+    }
+    return res;
+  };
+
+  // the app's own files: network first (3 s), cache when there's no signal
+  if (own) {
+    e.respondWith(new Promise(resolve => {
+      let settled = false;
+      const fallback = () => caches.match(req).then(hit => hit || caches.match('index.html'));
+      const t = setTimeout(() => { settled = true; resolve(fallback()); }, 3000);
+      fetch(req).then(res => { clearTimeout(t); save(res); if (!settled) resolve(res); })
+        .catch(() => { clearTimeout(t); if (!settled) resolve(fallback()); });
+    }));
+    return;
+  }
+
+  // fonts and Leaflet: cache first
+  e.respondWith(caches.match(req).then(hit => hit || fetch(req).then(save).catch(() => hit)));
 });

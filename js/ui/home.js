@@ -1,275 +1,186 @@
 /* HOURS — ui/home.js
-   The odometer, the GO button, the week ribbon, this week's numbers, and the
-   handful of nudges that stop him abandoning the app. */
+   The total, GO, the one-tap errand tiles for a forgotten run, and the last
+   few runs. Everything a run needs is on this one screen. */
 
 import * as store from '../store.js';
 import * as drive from '../drive.js';
+import * as errands from '../errands.js';
 import * as S from '../stats.js';
-import * as routines from '../routines.js';
-import { getFix } from '../geo.js';
-import { el, clear, odometer, odometerCountUp, toast, ask, reduceMotion } from './widgets.js';
+import { el, svg, icon, bigDuration, countUp, toast } from './widgets.js';
 import { show } from './screens.js';
-import { openQuickAdd } from './finish.js';
+import { openQuickLog, openTakeaway, openErrandEditor, openFinish, openEditRun } from './sheets.js';
 
-let odo = null;
+let lastShown = null;          // the number on screen last time, for the roll-up
+let lastRange = null;
 
 export function mount(root) {
   const state = store.get();
   const drives = state.drives;
   const live = store.getLive();
+  const range = state.settings.homeRange || 'week';
+
+  /* --- top bar ------------------------------------------------------- */
+  const now = new Date();
+  root.appendChild(el('div', { class: 'topbar' },
+    el('div', { class: 'wordmark' }, el('i'), 'HOURS'),
+    el('div', { class: 'when', text: `${S.DAY_SHORT[now.getDay()]} ${S.fmtDate(now)}` })
+  ));
 
   /* --- notices ------------------------------------------------------- */
-  if (live && drive.isStale()) root.appendChild(recoveryCard(live));
-  if (!state.settings.homeCoords) root.appendChild(homeSetupCard());
-  const routineNote = routineNotice();
-  if (routineNote) root.appendChild(routineNote);
-  const nudge = gapNudge(drives);
-  if (nudge) root.appendChild(nudge);
+  if (live && drive.isStale()) root.appendChild(staleCard(live));
+  const unnamed = drives.filter(d => !d.errandId && !d.placeLabel && d.origin === 'live')
+    .sort((a, b) => b.startedAt - a.startedAt)[0];
+  if (unnamed) root.appendChild(unnamedCard(unnamed));
 
-  /* --- odometer ------------------------------------------------------ */
-  const mins = S.sentMinutes(drives);
-  odo = odometer({ value: mins, minDigits: 1, className: 'odo-hero' });
-  root.appendChild(el('div', { class: 'home-top' },
-    odo.node,
-    el('div', { class: 'odo-label' },
-      el('div', { text: 'minutes spent on other people’s errands' })
-    )
-  ));
-  odometerCountUp(odo, mins);
+  /* --- the number ----------------------------------------------------- */
+  const sum = S.summary(drives, range);
+  const big = bigDuration(lastRange === range && lastShown !== null ? lastShown : sum.ms);
+  if (lastRange === range && lastShown !== null && lastShown !== sum.ms) countUp(big, lastShown, sum.ms);
+  else if (lastShown === null) countUp(big, 0, sum.ms, 1100);
+  lastShown = sum.ms; lastRange = range;
 
-  /* --- GO / STOP ----------------------------------------------------- */
-  root.appendChild(live && !drive.isStale() ? stopButton() : goButton());
+  const seg = el('div', { class: 'seg', role: 'tablist' });
+  ['week', 'month', 'all'].forEach(r => seg.appendChild(el('button', {
+    class: r === range ? 'on' : '', text: S.RANGES[r].short, role: 'tab',
+    onclick: () => { store.setting('homeRange', r); lastShown = null; show('home'); }
+  })));
 
-  /* --- week ribbon --------------------------------------------------- */
-  const rib = S.ribbon(drives);
-  const strip = el('div', { class: 'ribbon' });
-  const labels = el('div', { class: 'ribbon-labels' });
-  rib.days.forEach(day => {
-    const col = el('div', { class: 'ribbon-day' + (day.isToday ? ' today' : '') });
-    if (!day.segments.length) {
-      col.appendChild(el('div', { class: 'ribbon-base' }));
-    } else {
-      day.segments.forEach(seg => {
-        const h = Math.max(3, Math.round((seg.ms / rib.peak) * 78));
-        col.appendChild(el('div', { class: 'ribbon-seg ' + seg.cat, style: { height: h + 'px' } }));
-      });
-    }
-    strip.appendChild(col);
-    labels.appendChild(el('span', { class: day.isToday ? 'today' : '', text: day.letter }));
-  });
-  root.appendChild(el('div', { class: 'card' },
-    el('div', { class: 'label', style: { marginBottom: '10px' } }, 'YOUR LAST 7 DAYS'),
-    strip, labels
+  const km = sum.km.known ? ` · <b>~${S.fmtKm(sum.km.km)}</b> km` : '';
+  const meta = el('div', { class: 'hero-meta' });
+  meta.innerHTML = `<b>${sum.runs}</b> run${sum.runs === 1 ? '' : 's'}${km}`;
+
+  root.appendChild(el('section', { class: 'hero' },
+    el('div', { class: 'hero-label' }, 'Time helping the family ', el('span', { class: 'faint', text: '· ' + S.RANGES[range].label.toLowerCase() })),
+    big,
+    el('div', { class: 'hero-foot' }, seg, deltaLine(sum, range) || meta),
+    sum.prevMs !== null ? el('div', { class: 'hero-meta', style: { marginTop: '10px' } }, meta) : null
   ));
 
-  /* --- this week's chips --------------------------------------------- */
-  const thisWeek = S.weekSummary(drives, S.startOfWeek(Date.now()));
-  const lastWeek = S.weekSummary(drives, S.startOfWeek(Date.now()) - 7 * S.DAY_MS);
+  /* --- GO / out ------------------------------------------------------- */
+  if (live && !drive.isStale()) {
+    root.appendChild(el('button', { class: 'out-card', onclick: () => show('driving') },
+      el('i', { class: 'pulse' }),
+      el('div', {}, el('div', { class: 't', text: 'Out on a run' }), el('div', { class: 's', text: `Left at ${S.fmtTime(live.startedAt)}` })),
+      el('span', { class: 'go-on', text: 'Open →' })
+    ));
+  } else if (!live) {
+    root.appendChild(goButton());
+  }
 
-  root.appendChild(el('div', { class: 'chips3' },
-    chip(thisWeek.sentMinutes, 'mins sent', S.delta(thisWeek.sentMinutes, lastWeek.sentMinutes), 'down', 'min'),
-    chip(thisWeek.drives, 'drives', S.delta(thisWeek.drives, lastWeek.drives), 'up', ''),
-    chip(thisWeek.km, 'km', S.delta(thisWeek.km, lastWeek.km), 'up', '')
+  /* --- forgot to tap GO ---------------------------------------------- */
+  const tiles = el('div', { class: 'tiles' });
+  errands.main().forEach(e => tiles.appendChild(tile(e.icon, e.name, `${e.minutes} min`, () => openQuickLog(e))));
+  const tk = errands.takeaway();
+  tiles.appendChild(tile('food', 'Get takeaway', tk.length ? `${tk.length} place${tk.length === 1 ? '' : 's'}` : 'Add a place', () => openTakeaway()));
+  tiles.appendChild(tile('plus', 'Something else', 'New button', () => openErrandEditor(null, { onSaved: openQuickLog }), 'dashed'));
+
+  root.appendChild(el('section', { class: 'section' },
+    el('div', { class: 'section-head' }, el('span', { class: 'label', text: 'Forgot to tap GO?' }), el('span', { class: 'hint', text: 'One tap logs it' })),
+    tiles
   ));
 
-  root.appendChild(el('button', {
-    class: 'text-btn',
-    text: '+ Log a past drive',
-    onclick: () => openQuickAdd()
-  }));
+  /* --- recent -------------------------------------------------------- */
+  const recent = store.drivesDesc().slice(0, 4);
+  if (recent.length) {
+    const list = el('div', { class: 'runs' });
+    recent.forEach(d => list.appendChild(runRow(d)));
+    root.appendChild(el('section', { class: 'section' },
+      el('div', { class: 'section-head' },
+        el('span', { class: 'label', text: 'Recent' }),
+        el('button', { class: 'link', text: 'All runs →', onclick: () => show('runs') })),
+      list
+    ));
+  }
 }
 
-export function unmount() { odo = null; }
+export function unmount() {}
 
-/* --- pieces ------------------------------------------------------------ */
+/* --- pieces --------------------------------------------------------- */
 
-function chip(value, key, d, goodDir, unit) {
-  const cls = d.dir === 'flat' ? 'flat' : (d.dir === goodDir ? 'good' : 'bad');
-  const arrow = d.dir === 'up' ? '▲' : d.dir === 'down' ? '▼' : '–';
-  const text = d.dir === 'flat' ? 'same as last week' : `${arrow} ${d.diff}${unit ? ' ' + unit : ''}`;
-  return el('div', { class: 'chip-stat' },
-    el('div', { class: 'v', text: String(value) }),
-    el('div', { class: 'k', text: key }),
-    el('div', { class: 'd ' + cls, text })
-  );
+function deltaLine(sum, range) {
+  if (sum.prevMs === null) return null;
+  const diff = sum.ms - sum.prevMs;
+  const word = range === 'week' ? 'last week' : 'last month';
+  if (Math.abs(diff) < 60000) return el('span', { class: 'delta', text: `Same as ${word} so far` });
+  const up = diff > 0;
+  return el('span', { class: 'delta ' + (up ? 'up' : 'down') },
+    el('span', { class: 'arr', text: up ? '▲' : '▼' }),
+    `${S.fmtDur(Math.abs(diff))} ${up ? 'more' : 'less'} than ${word}`);
 }
 
 function goButton() {
-  const wrap = el('div', { class: 'go-wrap' });
-  const btn = el('button', { class: 'go-btn', 'aria-label': 'Start a drive' },
-    el('div', { class: 'go-word', text: 'GO' })
-  );
-  wrap.appendChild(el('div', { class: 'go-well' }));
-  wrap.appendChild(el('div', { class: 'go-ring' }));
-  wrap.appendChild(btn);
-
-  btn.addEventListener('pointerdown', () => wrap.classList.add('pressed'));
-  ['pointerup', 'pointercancel', 'pointerleave'].forEach(ev =>
-    btn.addEventListener(ev, () => wrap.classList.remove('pressed')));
-
-  btn.addEventListener('click', () => {
-    if (!reduceMotion()) {
-      const ring = el('div', { class: 'go-commit' });
-      wrap.appendChild(ring);
-      setTimeout(() => ring.remove(), 520);
-    }
-    drive.start();
-    show('driving');
-  });
-  return wrap;
-}
-
-function stopButton() {
-  const wrap = el('div', { class: 'go-wrap stop' });
-  const timer = el('div', { class: 'go-sub', text: S.fmtClock(drive.elapsedMs()) });
-  const btn = el('button', { class: 'go-btn stop', 'aria-label': 'Back to the drive' },
-    el('div', {}, el('div', { class: 'go-word', text: 'STOP' }), timer)
-  );
-  wrap.appendChild(el('div', { class: 'go-well' }));
-  wrap.appendChild(el('div', { class: 'go-ring' }));
-  wrap.appendChild(btn);
-
-  const tick = setInterval(() => {
-    if (!document.body.contains(timer)) { clearInterval(tick); return; }
-    timer.textContent = S.fmtClock(drive.elapsedMs());
-  }, 1000);
-
-  btn.addEventListener('click', () => show('driving'));
-  return wrap;
-}
-
-/* The forgotten drive. Friendly, one tap to fix, never an error. */
-function recoveryCard(live) {
-  const when = `${S.fmtTime(live.startedAt)} on ${S.DAY_LONG[new Date(live.startedAt).getDay()]}`;
-  const card = el('div', { class: 'notice warn' },
-    el('h3', { text: 'Unfinished drive' }),
-    el('p', { text: `You started a drive at ${when} and never finished it.` })
-  );
-  const row = el('div', { class: 'row' });
-
-  row.appendChild(el('button', {
-    class: 'btn primary', text: 'Finish it now',
-    onclick: () => {
-      const d = drive.recoverWith(null);
-      show('home');
-      toast(`Logged. ${S.fmtDur(d.durationMs)}.`);
-    }
-  }));
-  row.appendChild(el('button', {
-    class: 'btn', text: 'Set the time myself',
-    onclick: () => durationPicker(live)
-  }));
-  row.appendChild(el('button', {
-    class: 'btn ghost', text: 'Bin it',
-    onclick: async () => {
-      const yes = await ask({
-        title: 'Bin that drive?',
-        body: 'It will not be logged at all.',
-        buttons: [{ label: 'Bin it', value: true, style: 'danger' }, { label: 'Keep it', value: false }]
-      });
-      if (yes) { drive.binLive(); show('home'); toast('Binned.'); }
-    }
-  }));
-  card.appendChild(row);
-  return card;
-}
-
-function durationPicker(live) {
-  import('./widgets.js').then(({ sheet, stepper, el: E }) => {
-    sheet((panel, close) => {
-      panel.appendChild(E('h2', { text: 'How long was it?' }));
-      panel.appendChild(E('p', { class: 'muted tiny', text: `Started ${S.fmtTime(live.startedAt)}.`, style: { marginTop: '6px' } }));
-      const st = stepper({ value: 20, step: 5, min: 1, max: 600, format: v => S.fmtDur(v * 60000) });
-      panel.appendChild(E('div', { class: 'sheet-section' }, st.node));
-      panel.appendChild(E('button', {
-        class: 'btn primary wide', text: 'Log it', style: { marginTop: '18px' },
-        onclick: () => {
-          const d = drive.recoverWith(st.value * 60000);
-          close();
-          show('home');
-          toast(`Logged. ${S.fmtDur(d.durationMs)}.`);
-        }
-      }));
-    });
-  });
-}
-
-function homeSetupCard() {
-  const card = el('div', { class: 'notice' },
-    el('h3', { text: 'Where is home?' }),
-    el('p', { text: 'Tap this while you are at home, so I can tell when you have got back.' })
-  );
-  card.appendChild(el('div', { class: 'row' },
+  const ticks = svg('svg', { class: 'bezel', viewBox: '0 0 236 236', 'aria-hidden': 'true' });
+  for (let i = 0; i < 60; i++) {
+    const a = (i / 60) * Math.PI * 2;
+    const major = i % 5 === 0;
+    const r1 = 116, r2 = major ? 106 : 110;
+    ticks.appendChild(svg('line', {
+      class: major ? 'major' : null,
+      x1: 118 + Math.sin(a) * r1, y1: 118 - Math.cos(a) * r1,
+      x2: 118 + Math.sin(a) * r2, y2: 118 - Math.cos(a) * r2
+    }));
+  }
+  return el('div', { class: 'go-zone' },
     el('button', {
-      class: 'btn primary', text: 'I am home now',
-      onclick: async () => {
-        const fix = await getFix();
-        if (fix.ok) {
-          store.setting('homeCoords', fix.coords);
-          toast('Home saved.');
-          show('home');
-        } else {
-          toast(fix.status === 'denied' ? 'No location permission.' : 'Could not find you.');
-        }
+      class: 'go', 'aria-label': 'GO — start a run',
+      onclick: () => {
+        drive.start();
+        if (navigator.vibrate) navigator.vibrate(12);
+        show('driving');
       }
-    })
-  ));
-  return card;
+    },
+      ticks,
+      el('span', { class: 'ring' }),
+      el('span', { class: 'core' }, el('b', { text: 'GO' }), el('span', { text: 'Tap as you leave' }))
+    )
+  );
 }
 
-/* "Logged your gym run — 7 min each way." Once a day, dismissible. */
-function routineNotice() {
-  const today = S.dayKey(Date.now());
-  if (store.get().settings.routineNoticeOn === today) return null;
-
-  const todays = store.get().drives.filter(d =>
-    d.origin === 'routine' && S.dayKey(d.startedAt) === today);
-  if (!todays.length) return null;
-
-  const routineId = todays[0].routineId;
-  const r = store.get().routines.find(x => x.id === routineId);
-  const name = (r && r.name) || todays[0].placeLabel || 'routine';
-  const legs = todays.filter(d => d.routineId === routineId);
-  const mins = legs[0] ? S.formatMins(legs[0].durationMs) : 0;
-
-  const line = el('div', { class: 'line-nudge' });
-  line.appendChild(el('span', {}, `Logged your ${name.toLowerCase()} — ${mins} min${legs.length > 1 ? ' each way' : ''}.`));
-  const right = el('div', { class: 'row' });
-  right.appendChild(el('button', {
-    text: 'Didn’t go',
-    onclick: () => {
-      const gone = routines.didntGo(routineId, Date.now());
-      store.setting('routineNoticeOn', today);
-      show('home');
-      toast(gone.length > 1 ? 'Wiped. Both legs.' : 'Wiped.', {
-        action: { label: 'Undo', fn: () => { store.restoreDrives(gone); show('home'); } }, ms: 6000
-      });
-    }
-  }));
-  right.appendChild(el('button', {
-    class: 'x-dismiss', text: '✕',
-    onclick: () => { store.setting('routineNoticeOn', today); line.remove(); }
-  }));
-  line.appendChild(right);
-  return line;
+function tile(ic, name, meta, onclick, extra = '') {
+  return el('button', { class: 'tile ' + extra, onclick },
+    icon(ic),
+    el('div', {}, el('div', { class: 'nm', text: name }), el('div', { class: 'mt', text: meta }))
+  );
 }
 
-/* Nothing logged in a while? Offer quick-add. Once a day, dismissible. */
-function gapNudge(drives) {
-  const today = S.dayKey(Date.now());
-  if (store.get().settings.nudgeDismissedOn === today) return null;
-  if (drives.length < 3) return null;
-  const gap = S.daysSinceLastDrive(drives);
-  if (gap === null || gap <= 4) return null;
+export function runRow(d, { showDay = true } = {}) {
+  const tag = d.origin === 'quick' || d.origin === 'backfill' ? el('span', { class: 'tag', text: 'ADDED' }) : null;
+  const when = showDay ? `${S.fmtDayHead(d.startedAt)} · ${S.fmtTime(d.startedAt)}` : `${S.fmtTime(d.startedAt)} – ${S.fmtTime(d.endedAt)}`;
+  return el('button', { class: 'run', onclick: () => openEditRun(d) },
+    icon(errands.iconFor(d)),
+    el('div', { class: 'mid' },
+      el('div', { class: 'nm' }, errands.labelFor(d), tag),
+      el('div', { class: 'tm', text: when })
+    ),
+    el('div', { class: 'dur', text: S.fmtDur(d.durationMs) })
+  );
+}
 
-  const line = el('div', { class: 'line-nudge' });
-  line.appendChild(el('span', { text: `Nothing logged since ${S.lastDriveWeekday(drives)}. Missed a few?` }));
-  const right = el('div', { class: 'row' });
-  right.appendChild(el('button', { text: 'Add them', onclick: () => openQuickAdd() }));
-  right.appendChild(el('button', {
-    class: 'x-dismiss', text: '✕',
-    onclick: () => { store.setting('nudgeDismissedOn', today); line.remove(); }
-  }));
-  line.appendChild(right);
-  return line;
+function unnamedCard(d) {
+  return el('div', { class: 'notice' },
+    icon('pin', 'sun'),
+    el('div', { class: 'txt' },
+      el('h3', { text: `${S.fmtDur(d.durationMs)} run — what was it?` }),
+      el('p', { text: `${S.fmtDayHead(d.startedAt)}, back at ${S.fmtTime(d.endedAt)}` })),
+    el('button', { class: 'btn sm', text: 'Name it', onclick: () => openFinish(d) })
+  );
+}
+
+/* GO was tapped more than 6 hours ago and I'M BACK never came. */
+function staleCard(live) {
+  let mins = 30;
+  const e = live.errandId && store.getErrand(live.errandId);
+  if (e) mins = e.minutes;
+  return el('div', { class: 'notice', style: { flexDirection: 'column', alignItems: 'stretch' } },
+    el('div', { class: 'txt' },
+      el('h3', { text: 'Forgot to tap I’m back?' }),
+      el('p', { text: `You tapped GO ${S.fmtDayHead(live.startedAt).toLowerCase()} at ${S.fmtTime(live.startedAt)}. How long were you out?` })),
+    el('div', { class: 'row' },
+      ...[20, 30, 45, 60].map(m => el('button', {
+        class: 'btn sm' + (m === mins ? ' primary' : ''), text: `${m}m`,
+        onclick: () => { const d = drive.recoverWith(m * 60000); show('home'); if (d && !d.errandId) openFinish(d); else toast('Logged.'); }
+      })),
+      el('button', { class: 'btn sm ghost', text: 'Bin it', onclick: () => { drive.binLive(); show('home'); } })
+    )
+  );
 }

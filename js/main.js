@@ -1,33 +1,20 @@
 /* HOURS — main.js
-   Boot, the atmosphere layer, the ?go=1 / ?end=1 widget hooks, and the two
-   things that must happen every time the app comes back to life: recompute
-   the clock from its timestamp, and let the routines catch up. */
+   Boot, the ?go=1 / ?end=1 home-screen buttons, and what must happen every
+   time the app comes back to life: recompute the clock from its timestamp. */
 
 import * as store from './store.js';
 import * as drive from './drive.js';
-import * as routines from './routines.js';
+import * as errands from './errands.js';
 import * as screens from './ui/screens.js';
-import { el, sheet, toast } from './ui/widgets.js';
-import { endDrive } from './ui/finish.js';
-
-const CATCHUP_EVERY_MS = 60000;
+import { el, sheet } from './ui/widgets.js';
+import { back } from './ui/driving.js';
 
 function boot() {
   store.load();
-  paintGrain();
+  errands.seed();                        // the one-tap buttons, first time only
+  errands.backfill();                    // the Sept 2026 runs that were never logged
   screens.init();
-
-  const first = store.get().settings.firstRun;
-  if (first) {
-    routines.seed();                    // one routine: Gym, Wed + Fri, 6:30am
-    store.setting('firstRun', false);
-  }
   store.setting('lastOpened', Date.now());
-
-  const caught = routines.catchUp();
-  if (caught.capped) {
-    setTimeout(() => toast('Only filled in the last two weeks.', { ms: 5000 }), 1200);
-  }
 
   const params = new URLSearchParams(location.search);
   const wantsGo = params.has('go');
@@ -36,107 +23,73 @@ function boot() {
     history.replaceState(null, '', location.pathname);   // a refresh must not re-fire it
   }
 
-  /* --- the widget hooks --------------------------------------------- */
+  /* --- the home-screen buttons -------------------------------------- */
   if (wantsGo) {
     if (!store.getLive()) drive.start();                 // a double tap is harmless
     screens.show('driving');
   } else if (wantsEnd && store.getLive()) {
-    screens.show('home');
-    endDrive();
+    back();                                              // same as tapping I'M BACK
   } else if (store.getLive() && !drive.isStale()) {
-    screens.show('driving');                             // reopened mid-drive: normal
+    screens.show('driving');                             // reopened mid-run
   } else {
     screens.show('home');
   }
 
-  if (!store.get().settings.seenTour && !wantsGo && !wantsEnd) showTour();
+  if (!store.get().settings.seenV2 && !wantsGo && !wantsEnd) whatsNew();
 
-  drive.retryPendingRoutes();
+  errands.resolveRoutes();
 
-  setInterval(() => {
-    const before = store.get().drives.length;
-    routines.catchUp();
-    if (store.get().drives.length !== before && screens.current() === 'home') screens.refresh();
-  }, CATCHUP_EVERY_MS);
+  // any change to runs or buttons re-draws the screen underneath (not the
+  // live clock or the map, which look after themselves)
+  let pending = null;
+  const redraw = () => {
+    clearTimeout(pending);
+    pending = setTimeout(() => {
+      const now = screens.current();
+      if (now && now !== 'driving' && now !== 'map') screens.refresh();
+    }, 30);
+  };
+  store.on('drives', redraw);
+  store.on('errands', redraw);
 
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) return;
-    routines.catchUp();
-    drive.retryPendingRoutes();
     const now = screens.current();
     if (now && now !== 'driving' && now !== 'map') screens.refresh();
   });
+  window.addEventListener('online', () => errands.resolveRoutes());
 
-  window.addEventListener('online', () => drive.retryPendingRoutes());
-
-  /* The service worker is what makes the app open with no signal — but its
-     cache-first shell would also serve stale code while building locally, so
-     it is only registered on the real site, never on localhost or the LAN. */
+  /* The service worker lets the app open with no signal. Not on localhost,
+     where it would serve stale code while building. */
   const localDev = /^(localhost|127\.0\.0\.1|\[::1\]|192\.168\.|10\.)/.test(location.hostname);
   if ('serviceWorker' in navigator && !localDev) {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('sw.js').catch(() => {});
-    });
+    window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
   }
 
-  // a small handle for poking at it in the console
-  window.HOURS = { store, drive, routines, screens };
+  window.HOURS = { store, drive, errands, screens };   // a handle for the console
 }
 
-/* --- film grain: one canvas of static noise, tiled ------------------- */
-
-function paintGrain() {
-  const c = document.createElement('canvas');
-  c.width = c.height = 128;
-  const g = c.getContext('2d');
-  const img = g.createImageData(128, 128);
-  for (let i = 0; i < img.data.length; i += 4) {
-    const v = Math.random() * 255;
-    img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
-    img.data[i + 3] = 255;
-  }
-  g.putImageData(img, 0, 0);
-  const node = document.getElementById('grain');
-  if (node) node.style.backgroundImage = `url(${c.toDataURL('image/png')})`;
+/* One time only: what changed in HOURS 2. */
+function whatsNew() {
+  const s = store.get();
+  const added = s.drives.filter(d => d.origin === 'backfill').length;
+  sheet((panel, close) => {
+    panel.appendChild(el('div', { class: 'label', text: 'HOURS 2' }));
+    panel.appendChild(el('h2', { style: { marginTop: '8px' } }, 'Now it only counts ', el('span', { class: 'sun-text', text: 'time helping the family.' })));
+    const list = el('div', { class: 'stack field' },
+      point('Tap GO as you walk out, I’M BACK when you walk in. Shopping and waiting count too.'),
+      point('Forgot? One tap on an errand button logs it with its usual time.'),
+      added ? point(`${added} runs from the last two weeks have been added for you.`) : null,
+      point('Personal drives and the gym are gone. The old data is still downloadable in Settings.'),
+      point('Show the family the Proof tab.')
+    );
+    panel.appendChild(list);
+    panel.appendChild(el('div', { class: 'foot' }, el('button', { class: 'btn primary wide', text: 'Let’s go', onclick: close })));
+  }, { onClose: () => store.setting('seenV2', true) });
+}
+function point(text) {
+  return el('div', { style: { display: 'flex', gap: '12px', color: 'var(--tx-2)' } },
+    el('span', { class: 'sun-text', style: { fontWeight: '800' }, text: '—' }), el('span', { text }));
 }
 
-/* --- first-run tour --------------------------------------------------- */
-
-const TOUR = [
-  { n: '1', h: 'Tap GO when you get in', p: 'One tap as you sit down. That is the whole app.' },
-  { n: '2', h: 'Lock your phone', p: 'The clock keeps running with the screen off. It is a stored time, not a ticking counter — it cannot drift and it cannot be lost.' },
-  { n: '3', h: 'Tap HOME when you are back', p: 'Hold the red button for a moment, say whether you were sent or you chose it, and it is logged.' }
-];
-
-function showTour() {
-  let i = 0;
-  const back = el('div', { class: 'tour-back' });
-  const card = el('div', { class: 'tour-card' });
-  back.appendChild(card);
-
-  function paint() {
-    card.replaceChildren();
-    const step = TOUR[i];
-    const dots = el('div', { class: 'tour-dots' });
-    TOUR.forEach((_, k) => dots.appendChild(el('i', { class: k === i ? 'on' : '' })));
-    card.appendChild(el('div', { class: 'n', text: step.n }));
-    card.appendChild(el('h2', { text: step.h }));
-    card.appendChild(el('p', { text: step.p }));
-    card.appendChild(dots);
-    card.appendChild(el('button', {
-      class: 'btn primary wide',
-      text: i === TOUR.length - 1 ? 'Got it' : 'Next',
-      onclick: () => { i++; if (i >= TOUR.length) done(); else paint(); }
-    }));
-    card.appendChild(el('button', { class: 'text-btn', text: 'Skip', onclick: done }));
-  }
-  function done() {
-    store.setting('seenTour', true);
-    back.remove();
-  }
-  paint();
-  document.body.appendChild(back);
-}
-
-/* everything above is declared before this runs */
 boot();

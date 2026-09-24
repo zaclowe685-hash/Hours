@@ -1,15 +1,16 @@
 /* HOURS — ui/widgets.js
-   The shared pieces: the mechanical odometer, bottom sheets, toasts, the
-   category toggle, the hold-to-end button, tag input, steppers, switches. */
+   The shared pieces: DOM helpers, icons, the big sunset number, bottom
+   sheets, toasts, the minutes stepper. */
 
-/* --- tiny DOM helper --------------------------------------------------- */
+import { hm } from '../stats.js';
+
+/* --- tiny DOM helpers ------------------------------------------------- */
 
 export function el(tag, props = {}, ...children) {
   const node = document.createElement(tag);
   for (const [k, v] of Object.entries(props)) {
     if (v === null || v === undefined || v === false) continue;
     if (k === 'class') node.className = v;
-    else if (k === 'html') node.innerHTML = v;
     else if (k === 'text') node.textContent = v;
     else if (k.startsWith('on') && typeof v === 'function') node.addEventListener(k.slice(2).toLowerCase(), v);
     else if (k === 'style' && typeof v === 'object') Object.assign(node.style, v);
@@ -23,92 +24,97 @@ export function el(tag, props = {}, ...children) {
   return node;
 }
 
+const SVG_NS = 'http://www.w3.org/2000/svg';
+export function svg(tag, attrs = {}, ...children) {
+  const node = document.createElementNS(SVG_NS, tag);
+  for (const [k, v] of Object.entries(attrs)) if (v !== null && v !== undefined) node.setAttribute(k, v);
+  children.flat().forEach(c => c && node.appendChild(c));
+  return node;
+}
+
 export function clear(node) { while (node.firstChild) node.removeChild(node.firstChild); }
 
 export const reduceMotion = () =>
   window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-/* --- the palette, read once from theme.css ------------------------------
-   Canvas and SVG cannot use CSS custom properties, so they ask for them
-   here rather than repeating hex codes around the app. */
-
+/* Canvas / SVG / Leaflet can't read CSS variables, so they ask here. */
 let _pal = null;
 export function palette() {
   if (_pal) return _pal;
   const css = getComputedStyle(document.documentElement);
   const g = k => css.getPropertyValue(k).trim();
   _pal = {
-    ink: g('--ink'), ink2: g('--ink-2'), ink3: g('--ink-3'),
-    coral: g('--coral'), rust: g('--rust'), peach: g('--peach'),
-    teal: g('--teal'), bone: g('--bone'), dust: g('--dust'),
-    inkWarm: g('--ink-warm'), inkCool: g('--ink-cool'),
-    roadFar: g('--road-far'), roadNear: g('--road-near')
+    bg: g('--bg'), s1: g('--s1'), s2: g('--s2'), line2: g('--line-2'),
+    tx: g('--tx'), tx2: g('--tx-2'), tx3: g('--tx-3'),
+    sun1: g('--sun-1'), sun2: g('--sun-2'), sun3: g('--sun-3'), sun4: g('--sun-4')
   };
   return _pal;
 }
 
-/* #RRGGBB -> rgba(...) at the alpha you want */
-export function alpha(hex, a) {
-  const h = String(hex).replace('#', '');
-  const n = parseInt(h.length === 3 ? h.split('').map(c => c + c).join('') : h, 16);
-  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+/* --- icons (24x24 strokes) -------------------------------------------- */
+
+const ICONS = {
+  bag:   'M5.5 8.5h13l-1 11.5h-11zM9 8.5V7a3 3 0 0 1 6 0v1.5',
+  cart:  'M3 4h2.2l2.3 10.5h10l2-7.5H6.4M9.5 19.2h.01M16.5 19.2h.01',
+  food:  'M4.5 11h15M5.5 11a6.5 6.5 0 0 1 13 0M4 14.5h16M5.5 14.5v.8A3.2 3.2 0 0 0 8.7 18.5h6.6a3.2 3.2 0 0 0 3.2-3.2v-.8',
+  pin:   'M12 21s-6.5-5.8-6.5-11A6.5 6.5 0 0 1 18.5 10c0 5.2-6.5 11-6.5 11zM12 12.3a2.3 2.3 0 1 0 0-4.6 2.3 2.3 0 0 0 0 4.6z',
+  plus:  'M12 5v14M5 12h14',
+  car:   'M5 16.5V12l2-5h10l2 5v4.5M5 16.5h14M5 16.5V19h2.5v-2.5M16.5 16.5V19H19v-2.5M7.5 13.5h.01M16.5 13.5h.01M4 11h2M18 11h2',
+  pick:  'M4 17.5h10.5M14.5 17.5l3-3M14.5 17.5l3 3M8 6.5a2.5 2.5 0 1 0 0 .01M4.5 14c.5-2.5 1.8-4 3.5-4s3 1.5 3.5 4',
+  home:  'M3.5 11 12 4l8.5 7M5.5 9.5V20h13V9.5M10 20v-5.5h4V20',
+  check: 'M5 12.5l4.5 4.5L19 7.5',
+  close: 'M6 6l12 12M18 6 6 18'
+};
+export const ICON_CHOICES = ['bag', 'cart', 'food', 'pick', 'home', 'pin'];
+
+export function iconSvg(name) {
+  return svg('svg', { viewBox: '0 0 24 24', 'aria-hidden': 'true' },
+    svg('path', { d: ICONS[name] || ICONS.pin }));
+}
+export function icon(name, cls = '') {
+  return el('span', { class: 'ico ' + cls }, iconSvg(name));
 }
 
-/* --- the odometer ------------------------------------------------------
-   Vertical strips of 0-9 behind a window, each digit rolling 40 ms after the
-   one to its right so the number cascades like a real mechanical counter. */
+/* --- the big sunset number: "4h 40m" ---------------------------------- */
 
-const DIGIT_H_EM = 1.32;   // must match .odo-digit height in app.css
-
-export function odometer({ value = 0, minDigits = 1, className = '' } = {}) {
-  const node = el('div', { class: 'odo ' + className });
-  let digitCount = 0;
-
-  function build(n) {
-    clear(node);
-    for (let i = 0; i < n; i++) {
-      const strip = el('div', { class: 'odo-strip' });
-      for (let d = 0; d <= 9; d++) strip.appendChild(el('span', { text: String(d) }));
-      strip.style.transition = reduceMotion()
-        ? 'none'
-        : `transform 700ms cubic-bezier(.2,.9,.25,1)`;
-      node.appendChild(el('div', { class: 'odo-digit' }, strip));
-    }
-    digitCount = n;
-  }
-
-  function set(v, { animate = true } = {}) {
-    const str = String(Math.max(0, Math.round(Number(v) || 0))).padStart(minDigits, '0');
-    if (str.length !== digitCount) build(str.length);
-    [...str].forEach((ch, i) => {
-      const strip = node.children[i].firstChild;
-      const delay = (str.length - 1 - i) * 40;
-      strip.style.transitionDelay = animate ? delay + 'ms' : '0ms';
-      strip.style.transform = `translateY(-${Number(ch) * DIGIT_H_EM}em)`;
-    });
-  }
-
-  build(String(Math.max(0, Math.round(value))).padStart(minDigits, '0').length);
-  set(0, { animate: false });
-
-  return { node, set };
+export function bigDuration(ms, cls = '') {
+  const node = el('div', { class: 'big ' + cls });
+  paintDuration(node, ms);
+  return node;
+}
+export function paintDuration(node, ms) {
+  const { h, m } = hm(ms);
+  clear(node);
+  if (h) node.append(el('span', { class: 'n', text: String(h) }), el('span', { class: 'u', text: 'h' }));
+  node.append(el('span', { class: 'n', text: String(m) }), el('span', { class: 'u', text: 'm' }));
+}
+/* Rolls the number from `from` to `to`, easing out. */
+export function countUp(node, from, to, ms = 900) {
+  if (reduceMotion() || from === to) { paintDuration(node, to); return; }
+  const t0 = performance.now();
+  const step = now => {
+    const t = Math.min(1, (now - t0) / ms);
+    const e = 1 - Math.pow(1 - t, 3);
+    paintDuration(node, from + (to - from) * e);
+    if (t < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
 }
 
-/* The app's handshake: the big number rolls up from zero on every open. */
-export function odometerCountUp(odo, target) {
-  requestAnimationFrame(() => requestAnimationFrame(() => odo.set(target)));
+/* "+32m" floats up from a point — the moment a run lands. */
+export function fly(text, x = innerWidth / 2, y = innerHeight * 0.3) {
+  const node = el('div', { class: 'fly', text, style: { left: x + 'px', top: y + 'px' } });
+  document.body.appendChild(node);
+  setTimeout(() => node.remove(), 1200);
 }
 
 /* --- toasts ------------------------------------------------------------ */
 
-export function toast(message, { action = null, ms = 3200 } = {}) {
+export function toast(message, { action = null, ms = 3400 } = {}) {
   const host = document.getElementById('toast-host');
   if (!host) return { close() {} };
-
-  let done = false;
+  let done = false, timer;
   const node = el('div', { class: 'toast' }, el('span', { text: message }));
-  let timer;
-
   const close = () => {
     if (done) return;
     done = true;
@@ -116,13 +122,7 @@ export function toast(message, { action = null, ms = 3200 } = {}) {
     node.classList.add('out');
     setTimeout(() => node.remove(), 220);
   };
-
-  if (action) {
-    node.appendChild(el('button', {
-      text: action.label,
-      onclick: () => { close(); action.fn(); }
-    }));
-  }
+  if (action) node.appendChild(el('button', { text: action.label, onclick: () => { close(); action.fn(); } }));
   host.appendChild(node);
   timer = setTimeout(close, ms);
   return { close };
@@ -133,7 +133,7 @@ export function toast(message, { action = null, ms = 3200 } = {}) {
 let openSheets = 0;
 
 export function sheet(build, { onClose = null, dismissible = true } = {}) {
-  const panel = el('div', { class: 'sheet' }, el('div', { class: 'sheet-grip' }));
+  const panel = el('div', { class: 'sheet', role: 'dialog' }, el('div', { class: 'sheet-grip' }));
   const back = el('div', { class: 'sheet-back' }, panel);
 
   let closed = false;
@@ -141,7 +141,7 @@ export function sheet(build, { onClose = null, dismissible = true } = {}) {
     if (closed) return;
     closed = true;
     panel.classList.add('closing');
-    back.style.animation = 'fade-in 180ms reverse both';
+    back.style.animation = 'fade-in 200ms reverse both';
     setTimeout(() => {
       back.remove();
       openSheets = Math.max(0, openSheets - 1);
@@ -158,216 +158,67 @@ export function sheet(build, { onClose = null, dismissible = true } = {}) {
   return { close, panel };
 }
 
-/* A yes/no (or several-button) sheet. Resolves with the chosen value. */
+/* A several-button question. Resolves with the chosen value (null if dismissed). */
 export function ask({ title, body = '', buttons }) {
   return new Promise(resolve => {
+    let answered = false;
     sheet((panel, close) => {
       panel.appendChild(el('h2', { text: title }));
-      if (body) panel.appendChild(el('p', { class: 'muted tiny', text: body, style: { marginTop: '6px' } }));
-      const row = el('div', { class: 'stack', style: { marginTop: '20px' } });
+      if (body) panel.appendChild(el('p', { class: 'lede', text: body }));
+      const row = el('div', { class: 'stack foot' });
       buttons.forEach(b => row.appendChild(el('button', {
         class: 'btn wide ' + (b.style || ''),
         text: b.label,
-        onclick: () => { close(); resolve(b.value); }
+        onclick: () => { answered = true; close(); resolve(b.value); }
       })));
       panel.appendChild(row);
-    }, { onClose: () => resolve(null) });
+    }, { onClose: () => { if (!answered) resolve(null); } });
   });
 }
 
-/* --- the category toggle ----------------------------------------------- */
+/* --- stepper: − 30 min + ----------------------------------------------- */
 
-export function categoryToggle(initial, onChange) {
-  let value = initial || null;
-  const halves = {};
-
-  function paint() {
-    Object.entries(halves).forEach(([cat, node]) => node.classList.toggle('on', value === cat));
-  }
-
-  function half(cat, title, sub) {
-    const node = el('button', { class: 'cat-half', data: { cat } },
-      el('div', { class: 't', text: title }),
-      el('div', { class: 's', text: sub })
-    );
-    node.addEventListener('click', () => {
-      value = cat;
-      paint();
-      if (onChange) onChange(cat);
-    });
-    halves[cat] = node;
-    return node;
-  }
-
-  const node = el('div', { class: 'cat-toggle' },
-    half('sent', 'SENT', 'someone asked'),
-    half('chose', 'CHOSE', 'yours')
-  );
-  paint();
-  return { node, get value() { return value; }, set(v) { value = v; paint(); } };
-}
-
-/* --- hold-to-end button ------------------------------------------------ */
-
-export function holdButton({ label, holdMs = 600, onComplete }) {
-  const fill = el('div', { class: 'hold-fill' });
-  const node = el('button', { class: 'hold-btn' }, fill, el('span', { text: label }));
-
-  let raf = null, timer = null, startedAt = 0, fired = false;
-
-  function stop() {
-    if (raf) { cancelAnimationFrame(raf); raf = null; }
-    if (timer) { clearTimeout(timer); timer = null; }
-    fill.style.width = '0%';
-  }
-  function fire() {
-    if (fired) return;
-    fired = true;
-    stop();
-    onComplete();
-  }
-  /* the ring is painted by rAF, but completion is on a plain timer: ending
-     the drive must not depend on animation frames being scheduled */
-  function tick() {
-    const p = Math.min(1, (Date.now() - startedAt) / holdMs);
-    fill.style.width = (p * 100) + '%';
-    if (p < 1) raf = requestAnimationFrame(tick);
-  }
-  function begin(e) {
-    e.preventDefault();
-    if (fired) return;
-    startedAt = Date.now();
-    timer = setTimeout(fire, holdMs);
-    raf = requestAnimationFrame(tick);
-  }
-
-  node.addEventListener('pointerdown', begin);
-  ['pointerup', 'pointercancel', 'pointerleave'].forEach(ev => node.addEventListener(ev, stop));
-  return node;
-}
-
-/* --- tag input ---------------------------------------------------------- */
-/* space or enter turns what he typed into a chip. */
-
-export function tagInput({ initial = [], suggestions = [], onChange = null } = {}) {
-  let tags = [...initial];
-  const live = el('div', { class: 'tag-chips' });
-  const sugg = el('div', { class: 'tag-chips' });
-  const input = el('input', {
-    class: 'field',
-    type: 'text',
-    placeholder: 'woolies, brother, beach…',
-    autocapitalize: 'none',
-    autocorrect: 'off'
-  });
-
-  function fire() { if (onChange) onChange([...tags]); }
-
-  function add(raw) {
-    const t = String(raw).toLowerCase().replace(/[^a-z0-9-]/g, '');
-    if (!t || tags.includes(t)) return;
-    tags.push(t);
-    paint();
-    fire();
-  }
-  function remove(t) {
-    tags = tags.filter(x => x !== t);
-    paint();
-    fire();
-  }
-
-  function paint() {
-    clear(live);
-    tags.forEach(t => live.appendChild(el('button', {
-      class: 'tag live', onclick: () => remove(t)
-    }, '#' + t, el('b', { text: '✕' }))));
-
-    clear(sugg);
-    suggestions.filter(s => !tags.includes(s)).slice(0, 6).forEach(s =>
-      sugg.appendChild(el('button', { class: 'tag', text: '#' + s, onclick: () => add(s) }))
-    );
-  }
-
-  input.addEventListener('keydown', e => {
-    if (e.key === 'Enter' || e.key === ' ' || e.key === ',') {
-      e.preventDefault();
-      add(input.value);
-      input.value = '';
-    } else if (e.key === 'Backspace' && !input.value && tags.length) {
-      remove(tags[tags.length - 1]);
-    }
-  });
-  input.addEventListener('blur', () => { if (input.value.trim()) { add(input.value); input.value = ''; } });
-
-  paint();
-  const node = el('div', {}, input, live, sugg);
-  return { node, get value() { return [...tags]; }, commitTyped() { if (input.value.trim()) { add(input.value); input.value = ''; } } };
-}
-
-/* --- stepper ------------------------------------------------------------ */
-
-export function stepper({ value = 10, step = 5, min = 1, max = 600, format = v => v + ' min', onChange = null } = {}) {
+export function stepper({ value = 30, step = 5, min = 1, max = 600, onChange = null } = {}) {
   let v = value;
-  const out = el('div', { class: 'val', text: format(v) });
-  function set(nv) {
-    v = Math.min(max, Math.max(min, nv));
-    out.textContent = format(v);
+  const val = el('div', { class: 'val' });
+  const paint = () => {
+    const { h, m } = hm(v * 60000);
+    clear(val);
+    if (h) val.append(String(h), el('small', { text: 'h' }), ' ');
+    if (m || !h) val.append(String(m), el('small', { text: 'min' }));
+  };
+  const set = n => {
+    v = Math.max(min, Math.min(max, n));
+    paint();
     if (onChange) onChange(v);
-  }
+  };
   const node = el('div', { class: 'stepper' },
-    el('button', { text: '−', onclick: () => set(v - step) }),
-    out,
-    el('button', { text: '+', onclick: () => set(v + step) })
+    el('button', { type: 'button', 'aria-label': 'Less', text: '−', onclick: () => set(v - step) }),
+    val,
+    el('button', { type: 'button', 'aria-label': 'More', text: '+', onclick: () => set(v + step) })
   );
-  return { node, get value() { return v; }, set };
-}
-
-/* --- switch -------------------------------------------------------------- */
-
-export function toggleSwitch(on, onChange) {
-  const node = el('button', { class: 'switch' + (on ? ' on' : ''), 'aria-pressed': String(!!on) });
-  node.addEventListener('click', () => {
-    const next = !node.classList.contains('on');
-    node.classList.toggle('on', next);
-    node.setAttribute('aria-pressed', String(next));
-    onChange(next);
-  });
-  return node;
-}
-
-/* --- day-of-week pills ---------------------------------------------------- */
-
-const PILL_LETTERS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
-
-export function dayPills({ days = [], category = 'chose', onChange }) {
-  let value = [...days];
-  const node = el('div', { class: 'day-pills' });
-  const nodes = [];
-
-  function paint() {
-    nodes.forEach((p, i) => {
-      p.className = 'day-pill' + (value.includes(i) ? ' on ' + category : '');
-    });
-  }
-  for (let i = 0; i < 7; i++) {
-    const p = el('button', { class: 'day-pill', text: PILL_LETTERS[i] });
-    p.addEventListener('click', () => {
-      value = value.includes(i) ? value.filter(d => d !== i) : [...value, i].sort();
-      paint();
-      onChange([...value]);
-    });
-    nodes.push(p);
-    node.appendChild(p);
-  }
   paint();
-  return { node, get value() { return [...value]; }, setCategory(c) { category = c; paint(); } };
+  return { node, get: () => v, set };
 }
 
-/* --- svg helper ----------------------------------------------------------- */
+export function switchEl(on, onChange) {
+  const b = el('button', { class: 'switch' + (on ? ' on' : ''), role: 'switch', 'aria-checked': String(!!on), type: 'button' });
+  b.addEventListener('click', () => {
+    on = !on;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-checked', String(on));
+    onChange(on);
+  });
+  return b;
+}
 
-export function svg(tag, attrs = {}, ...children) {
-  const node = document.createElementNS('http://www.w3.org/2000/svg', tag);
-  Object.entries(attrs).forEach(([k, v]) => { if (v !== null && v !== undefined) node.setAttribute(k, v); });
-  children.flat().forEach(c => c && node.appendChild(c));
-  return node;
+/* <input type=datetime-local> wants "YYYY-MM-DDTHH:MM" in local time */
+export function toLocalInput(ts) {
+  const d = new Date(ts);
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+export function fromLocalInput(s) {
+  const t = new Date(s).getTime();
+  return isNaN(t) ? null : t;
 }

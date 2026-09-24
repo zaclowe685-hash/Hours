@@ -1,172 +1,140 @@
-/* HOURS — ui/settings.js */
+/* HOURS — ui/settings.js
+   Name, home, the one-tap buttons, the iPhone home-screen buttons, backups. */
 
 import * as store from '../store.js';
+import * as errands from '../errands.js';
 import * as S from '../stats.js';
 import { getFix } from '../geo.js';
-import { el, clear, sheet, ask, toast } from './widgets.js';
+import { el, icon, toast, ask } from './widgets.js';
 import { show } from './screens.js';
-import { openRoutines } from './routinesUI.js';
+import { openErrandEditor } from './sheets.js';
 
-export const APP_VERSION = '1.0.0';
-export const LIVE_URL = 'https://zaclowe685-hash.github.io/Hours/';
-
-function liveBase() {
-  // on the real site, use the address he is actually on
-  if (location.protocol.startsWith('http') && !/^(localhost|127|192\.168|10\.)/.test(location.hostname)) {
-    return location.origin + location.pathname.replace(/index\.html$/, '');
-  }
-  return LIVE_URL;
-}
+const SITE = 'https://zaclowe685-hash.github.io/Hours/';
 
 export function mount(root) {
-  root.appendChild(el('div', { class: 'screen-head' }, el('h1', { text: 'SETUP' })));
+  const s = store.get().settings;
 
-  /* --- put it on your phone (the important one) --------------------- */
-  const url = liveBase();
-  const guide = el('div', { class: 'card' },
-    el('h2', { text: 'Put it on your phone' }),
-    el('p', { class: 'muted tiny', text: 'This is the whole point — one tap from your home screen, no app to open.' })
-  );
+  root.appendChild(el('div', { class: 'topbar' }, el('h1', { class: 'title', text: 'Settings' })));
 
-  const urlRow = el('div', { class: 'row', style: { marginTop: '14px', gap: '8px' } },
-    el('code', { class: 'url', text: url }),
-    el('button', {
-      class: 'btn', text: 'Copy',
-      onclick: async () => {
-        try { await navigator.clipboard.writeText(url); toast('Copied.'); }
-        catch (e) { toast('Copy it by hand: ' + url, { ms: 6000 }); }
-      }
-    })
-  );
-  guide.appendChild(urlRow);
-
-  const steps = el('ol', { class: 'guide', style: { marginTop: '18px' } });
-  [
-    ['Open that link in <b>Safari</b> on your iPhone, tap the Share button, then <b>Add to Home Screen</b>. That gives you the app itself.'],
-    ['Make the one-tap GO widget: <b>Shortcuts</b> app → <b>+</b> → Add Action → <b>Open URL</b> → paste <code>' + url + '?go=1</code> → name it <b>GO</b> → pick a coral icon → <b>Add to Home Screen</b>.'],
-    ['Do the same again with <code>' + url + '?end=1</code> and call it <b>HOME</b>. Two widgets side by side is the fastest version of this app: tap GO getting in, tap HOME getting out.'],
-    ['Put them where your thumb already is: long-press the home screen → <b>+</b> → <b>Shortcuts</b> widget. They can also go on the <b>Lock Screen</b>, or on <b>Back Tap</b> (Settings → Accessibility → Touch → Back Tap → Double Tap → Shortcuts → GO).']
-  ].forEach(([html]) => steps.appendChild(el('li', { html })));
-  guide.appendChild(steps);
-  root.appendChild(guide);
-
-  /* --- home location ------------------------------------------------ */
-  const home = store.get().settings.homeCoords;
-  root.appendChild(el('div', { class: 'card' },
-    el('h2', { text: 'Home location' }),
-    el('p', { class: 'muted tiny', text: home ? 'Set. Drives that end here are logged as round trips.' : 'Not set yet. Tap the button while you are at home.' }),
-    el('div', { class: 'row', style: { marginTop: '12px' } },
-      el('button', {
-        class: 'btn primary', text: home ? 'Reset to where I am now' : 'I am home now',
-        onclick: async () => {
-          const fix = await getFix();
-          if (fix.ok) { store.setting('homeCoords', fix.coords); toast('Home saved.'); show('settings'); }
-          else toast(fix.status === 'denied' ? 'No location permission.' : 'Could not find you.');
-        }
-      }),
-      home && el('button', {
-        class: 'btn ghost', text: 'Forget it',
-        onclick: () => { store.setting('homeCoords', null); show('settings'); toast('Forgotten.'); }
-      })
-    )
+  /* --- you ------------------------------------------------------------ */
+  const name = el('input', { type: 'text', value: s.name || '', placeholder: 'Your name', maxlength: '24', autocapitalize: 'words' });
+  name.addEventListener('change', () => store.setting('name', name.value.trim()));
+  const home = s.homeCoords;
+  root.appendChild(group('You',
+    el('label', { class: 'item' }, el('div', { class: 'mid' }, el('div', { class: 'nm', text: 'Name' }), el('div', { class: 'ds', text: 'Shown on the Proof screen' })), name),
+    el('button', { class: 'item plain', onclick: setHome },
+      icon('home'),
+      el('div', { class: 'mid' },
+        el('div', { class: 'nm', text: 'Home' }),
+        el('div', { class: 'ds', text: home ? 'Set — tap to reset it to where you are now' : 'Not set — tap while you’re at home' })),
+      el('span', { class: 'end' }, el('i', { class: 'chev' })))
   ));
 
-  /* --- routines ------------------------------------------------------ */
-  const rs = store.get().routines;
-  const active = rs.filter(r => r.enabled).length;
-  root.appendChild(el('div', { class: 'card' },
-    el('h2', { text: 'Routines' }),
-    el('p', { class: 'muted tiny', text: `${rs.length} routine${rs.length === 1 ? '' : 's'}, ${active} running. Drives you always take, logged for you.` }),
-    el('button', { class: 'btn wide', style: { marginTop: '12px' }, text: 'Open routines', onclick: () => openRoutines() })
-  ));
+  /* --- buttons -------------------------------------------------------- */
+  const count = new Map();
+  store.get().drives.forEach(d => { if (d.errandId) count.set(d.errandId, (count.get(d.errandId) || 0) + 1); });
+  const rows = [...errands.main(), ...errands.takeaway()].map(e => {
+    const pinned = e.lat !== null && e.lat !== undefined;
+    const bits = [`${e.minutes} min`, e.group === 'takeaway' ? 'takeaway' : null, pinned ? (e.routeKm ? `${S.fmtKm(e.routeKm)} km away` : 'pinned') : 'no pin'].filter(Boolean);
+    return el('button', { class: 'item plain', onclick: () => openErrandEditor(e) },
+      icon(e.icon),
+      el('div', { class: 'mid' }, el('div', { class: 'nm', text: e.name }), el('div', { class: 'ds', text: bits.join(' · ') })),
+      el('span', { class: 'end' }, `${count.get(e.id) || 0}×`, el('i', { class: 'chev' })));
+  });
+  rows.push(el('button', { class: 'item plain', onclick: () => openErrandEditor(null) },
+    icon('plus'), el('div', { class: 'mid' }, el('div', { class: 'nm', text: 'Add a button' }))));
+  root.appendChild(group('Errand buttons', ...rows));
+  root.appendChild(el('p', { class: 'help-text', text: 'Pin a place (tap it, then “I’m here now”) and its runs get km and a line on the map.' }));
 
-  /* --- data ----------------------------------------------------------- */
-  const s = store.get();
-  root.appendChild(el('div', { class: 'card' },
-    el('h2', { text: 'Your data' }),
-    el('p', { class: 'muted tiny', text: `${s.drives.length} drives · ${s.places.length} places · saved on this device only.` }),
-    el('div', { class: 'row', style: { marginTop: '12px', gap: '8px' } },
-      el('button', { class: 'btn', text: 'Export', onclick: exportData }),
-      el('button', { class: 'btn', text: 'Import', onclick: importData })
-    )
+  /* --- iPhone buttons ------------------------------------------------- */
+  root.appendChild(group('iPhone home-screen buttons',
+    urlRow('GO', SITE + '?go=1'),
+    urlRow('BACK', SITE + '?end=1')
   ));
+  const how = el('p', { class: 'help-text' });
+  how.innerHTML = 'In the <b>Shortcuts</b> app: <b>+</b> → <b>Open URLs</b> → paste the link → name it → <b>Add to Home Screen</b>. ' +
+    'Tap <b>GO</b> as you walk out, <b>BACK</b> when you walk in. Both are safe to double-tap. Never touch the phone while driving.';
+  root.appendChild(how);
 
-  /* --- danger zone ---------------------------------------------------- */
-  root.appendChild(el('div', { class: 'card' },
-    el('h2', { text: 'Danger zone' }),
-    el('p', { class: 'muted tiny', text: 'Deletes every drive, place and routine on this device. There is no undo.' }),
-    el('button', { class: 'btn danger wide', style: { marginTop: '12px' }, text: 'Delete all data', onclick: deleteEverything })
-  ));
+  /* --- backup --------------------------------------------------------- */
+  const file = el('input', { type: 'file', accept: 'application/json,.json', style: { display: 'none' } });
+  file.addEventListener('change', importFile);
+  const backupRows = [
+    el('button', { class: 'item plain', onclick: () => download(store.exportJSON(), `hours-${S.dayKey(Date.now())}.json`) },
+      el('div', { class: 'mid' }, el('div', { class: 'nm', text: 'Export a backup' }), el('div', { class: 'ds', text: 'Saves every run to a file' }))),
+    el('button', { class: 'item plain', onclick: () => file.click() },
+      el('div', { class: 'mid' }, el('div', { class: 'nm', text: 'Import a backup' }), el('div', { class: 'ds', text: 'Adds runs from a file' })))
+  ];
+  if (store.preV2Backup()) backupRows.push(el('button', { class: 'item plain', onclick: () => download(store.preV2Backup(), 'hours-before-update.json') },
+    el('div', { class: 'mid' }, el('div', { class: 'nm', text: 'Download the old data' }), el('div', { class: 'ds', text: 'Everything from before this update, gym trips included' }))));
+  root.appendChild(group('Backup', ...backupRows, file));
 
-  root.appendChild(el('div', { class: 'card' },
-    el('div', { class: 'set-row' }, el('span', { class: 'k', text: 'Version' }), el('span', { class: 'v', text: APP_VERSION })),
-    el('div', { class: 'set-row' }, el('span', { class: 'k', text: 'Read me' }),
-      el('a', { class: 'v', href: 'README.md', target: '_blank', text: 'README.md →' })),
-    el('div', { class: 'set-row' }, el('span', { class: 'k', text: 'Routes by' }), el('span', { class: 'v', text: 'OSRM · OpenStreetMap · CARTO' }))
-  ));
+  root.appendChild(el('button', { class: 'btn danger wide', style: { marginTop: '28px' }, text: 'Erase everything', onclick: wipe }));
+  root.appendChild(el('div', { class: 'version', text: 'HOURS 2 · YOUR DATA STAYS ON THIS PHONE' }));
 }
 
 export function unmount() {}
 
-/* --- export / import ---------------------------------------------------- */
+/* --- pieces ------------------------------------------------------------ */
 
-function exportData() {
-  const blob = new Blob([store.exportJSON()], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = el('a', { href: url, download: `hours-backup-${S.dayKey(Date.now())}.json` });
+function group(title, ...children) {
+  return el('div', { class: 'group' }, el('span', { class: 'label', text: title }), el('div', { class: 'group-box' }, ...children));
+}
+
+function urlRow(label, url) {
+  return el('div', { class: 'url' },
+    el('span', { class: 'nm sun-text', text: label }),
+    el('code', { text: url }),
+    el('button', {
+      class: 'btn sm ghost', text: 'Copy',
+      onclick: async ev => {
+        try { await navigator.clipboard.writeText(url); ev.target.textContent = 'Copied'; }
+        catch (e) { toast('Couldn’t copy — press and hold the link instead.'); }
+      }
+    }));
+}
+
+async function setHome() {
+  toast('Finding you…', { ms: 1500 });
+  const fix = await getFix();
+  if (!fix.ok) { toast('Location is off for HOURS — turn it on in iPhone Settings.'); return; }
+  store.setting('homeCoords', fix.coords);
+  errands.resolveRoutes();
+  toast('Home set.');
+  show('settings');
+}
+
+function download(text, name) {
+  const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+  const a = el('a', { href: url, download: name });
   document.body.appendChild(a);
   a.click();
   a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 4000);
-  toast('Backup saved to your downloads.');
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
-function importData() {
-  const input = el('input', { type: 'file', accept: 'application/json,.json', style: { display: 'none' } });
-  document.body.appendChild(input);
-  input.addEventListener('change', async () => {
-    const file = input.files && input.files[0];
-    input.remove();
-    if (!file) return;
-    const text = await file.text();
-
-    const mode = await ask({
-      title: 'Import backup',
-      body: 'Replace everything on this device, or merge the two together?',
-      buttons: [
-        { label: 'Merge with what I have', value: 'merge' },
-        { label: 'Replace everything', value: 'replace', style: 'danger' },
-        { label: 'Cancel', value: null }
-      ]
-    });
-    if (!mode) return;
-
-    try {
-      const res = store.importJSON(text, mode);
-      show('settings');
-      toast(`Imported. ${res.drives} drives.`);
-    } catch (e) {
-      toast(e.message || 'That file would not import.', { ms: 5000 });
-    }
-  });
-  input.click();
+async function importFile(ev) {
+  const f = ev.target.files && ev.target.files[0];
+  ev.target.value = '';
+  if (!f) return;
+  try {
+    const res = store.importJSON(await f.text(), 'merge');
+    toast(`Imported — ${res.drives} runs now.`);
+    show('settings');
+  } catch (e) {
+    toast(e.message || 'That file didn’t work.');
+  }
 }
 
-function deleteEverything() {
-  sheet((panel, close) => {
-    panel.appendChild(el('h2', { text: 'Delete everything?' }));
-    panel.appendChild(el('p', { class: 'muted tiny', style: { marginTop: '6px' }, text: 'Type DELETE to confirm. This cannot be undone — export a backup first if you are not sure.' }));
-    const field = el('input', { class: 'field', type: 'text', placeholder: 'DELETE', style: { marginTop: '14px' }, autocapitalize: 'characters' });
-    const go = el('button', { class: 'btn danger wide', style: { marginTop: '14px' }, text: 'Delete all data', disabled: true });
-    field.addEventListener('input', () => { go.disabled = field.value.trim().toUpperCase() !== 'DELETE'; });
-    go.addEventListener('click', () => {
-      store.wipe();
-      close();
-      show('home');
-      toast('All gone.');
-    });
-    panel.appendChild(field);
-    panel.appendChild(go);
-    panel.appendChild(el('button', { class: 'btn ghost wide', style: { marginTop: '10px' }, text: 'Cancel', onclick: close }));
+async function wipe() {
+  const sure = await ask({
+    title: 'Erase everything?',
+    body: 'Every run and button on this phone is deleted. Export a backup first if you might want it.',
+    buttons: [{ label: 'Erase', value: true, style: 'danger' }, { label: 'Keep my data', value: false, style: 'ghost' }]
   });
+  if (!sure) return;
+  store.wipe();
+  errands.seed();
+  toast('Erased.');
+  show('home');
 }
