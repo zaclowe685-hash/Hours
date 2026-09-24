@@ -4,7 +4,7 @@
    Leaflet. Map tiles, OSRM and Nominatim are never
    cached — a stale route is worse than no route. */
 
-const CACHE_VERSION = 'hours-v2';
+const CACHE_VERSION = 'hours-v2.1';
 
 const SHELL = [
   './',
@@ -45,7 +45,9 @@ const NEVER_CACHE = [
 self.addEventListener('install', e => {
   e.waitUntil(
     caches.open(CACHE_VERSION)
-      .then(c => Promise.allSettled(SHELL.map(u => c.add(u))))
+      // cache: 'reload' skips GitHub Pages' 10-minute browser cache, so a new
+      // version never installs a stale copy of the old files
+      .then(c => Promise.allSettled(SHELL.map(u => c.add(new Request(u, { cache: 'reload' })))))
       .then(() => self.skipWaiting())
   );
 });
@@ -78,7 +80,8 @@ self.addEventListener('fetch', e => {
       let settled = false;
       const fallback = () => caches.match(req).then(hit => hit || caches.match('index.html'));
       const t = setTimeout(() => { settled = true; resolve(fallback()); }, 3000);
-      fetch(req).then(res => { clearTimeout(t); save(res); if (!settled) resolve(res); })
+      // by URL: a navigation Request can't be re-sent with new options
+      fetch(req.url, { cache: 'no-cache', credentials: 'same-origin' }).then(res => { clearTimeout(t); save(res); if (!settled) resolve(res); })
         .catch(() => { clearTimeout(t); if (!settled) resolve(fallback()); });
     }));
     return;
